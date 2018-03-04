@@ -46,7 +46,7 @@ if __name__ == "__main__":
             x = int(x * w) 
             cv2.circle(img, (x, y), 1, (0, 255, 255), -1)
         cv2.imwrite(os.path.join(out_folder, os.path.basename(im_path)), img)
-        if angles:
+        if angles is not None:
             print ("predicting {}, angle {}".format(im_path, angles.tolist()))
         else:
             print ("predicting {}".format(im_path))

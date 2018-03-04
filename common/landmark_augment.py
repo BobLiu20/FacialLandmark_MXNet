@@ -26,8 +26,8 @@ class LandmarkAugment(object):
         Raises:
             No
         '''
-        image, landmarks = self.__flip(image, landmarks)
-        image, landmarks = self.__rotate(image, landmarks, max_angle)
+        # image, landmarks = self.__flip(image, landmarks)
+        # image, landmarks = self.__rotate(image, landmarks, max_angle)
         image, landmarks = self.__scale_and_shift(image, landmarks, scale_range, output_size)
         landmarks = landmarks.flatten()
         return image, landmarks
@@ -116,7 +116,7 @@ class LandmarkAugment(object):
         if need_pad:
             box_image = np.lib.pad(box_image, ((p_y, p_h), (p_x, p_w), (0,0)), 'constant')
         box_image = cv2.resize(box_image, (output_size, output_size))
-        landmarks = (landmarks - (x1 - p_x, y1 - p_y)) / (new_size, new_size)
+        landmarks = (landmarks - (x1 - p_x, y1 - p_y)) / (float(new_size), float(new_size))
         return box_image, landmarks
 
     def get_bbox_of_landmarks(self, image, landmarks, scale_range, shift_rate=0.3):

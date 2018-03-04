@@ -124,6 +124,7 @@ class LandmarkHelper(object):
         d = json.loads(line)
         path = d["path"]
         landmarks = np.asarray([[int(v["x"]), int(v["y"])] for v in d["landmark"]], dtype=int)
+        landmarks = landmarks.reshape((-1, 2))
         angle = np.clip((np.asarray([d["pitch"], d["yaw"], d["roll"]]) + 90.0) / 180.0, 0.0, 1.0)
         return path, landmarks, angle
 
