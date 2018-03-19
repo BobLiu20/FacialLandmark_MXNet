@@ -6,6 +6,7 @@ import numpy as np
 import time
 import datetime
 
+sys.path.insert(0, "/home/liubofang/bob_opensource/incubator-mxnet-v1.1.0/python")
 import mxnet as mx
 from mxnet import nd
 from mxnet import gluon
@@ -17,20 +18,24 @@ from batch_reader import BatchReader
 import models
 
 def train(prefix, **arg_dict):
-    batch_size = arg_dict['batch_size']
     num_labels = arg_dict['landmark_type'] * 2
     img_size = arg_dict['img_size']
     train_angle = arg_dict['train_angle']
+    gpu_num = len(arg_dict["gpu_device"].split(','))
+    batch_size = arg_dict['batch_size'] * gpu_num
+    arg_dict['batch_size'] = batch_size
+    print ("real batch_size = %d for gpu_num = %d" % (batch_size, gpu_num))
     # batch generator
     _batch_reader = BatchReader(**arg_dict)
     _batch_generator = _batch_reader.batch_generator()
     # net
+    ctx = [mx.gpu(i) for i in range(gpu_num)]
     net =  models.init(num_label=num_labels, **arg_dict)
     if arg_dict["restore_ckpt"]:
         print "resotre checkpoint from %s" % (arg_dict["restore_ckpt"])
-        net.load_params(arg_dict['restore_ckpt'], ctx=mx.gpu())
+        net.load_params(arg_dict['restore_ckpt'], ctx=ctx)
     else:
-        net.initialize(init=mx.init.Xavier(), ctx=mx.gpu())
+        net.initialize(init=mx.init.Xavier(), ctx=ctx)
     print net
     # loss
     losses_func = []
@@ -47,45 +52,47 @@ def train(prefix, **arg_dict):
     start_time = time.time()
     step = 0
     display = 10
-    landmark_loss_list, angle_loss_list = [], []
+    loss_list = []
     while not _batch_reader.should_stop():
         batch = _batch_generator.next()
-        image = nd.array(batch[0], ctx=mx.gpu())
+        image = nd.array(batch[0])
         image = nd.transpose(image.astype('float32'), (0,3,1,2)) / 127.5 - 1.0
-        landmark = nd.array(batch[1], ctx=mx.gpu())
+        image_list = gluon.utils.split_and_load(image, ctx)
+        landmark = nd.array(batch[1])
+        landmark_list = gluon.utils.split_and_load(landmark, ctx)
         if train_angle:
-            angle = nd.array(batch[2], ctx=mx.gpu())
+            angle = nd.array(batch[2])
+            angle_list = gluon.utils.split_and_load(angle, ctx)
         with autograd.record():
-            predicts = net(image)
+            losses = []
             if train_angle:
-                landmark_loss = losses_func[0](predicts[0], landmark)
-                angle_loss = losses_func[1](predicts[1], angle)
-                loss = landmark_loss + angle_loss
+                for _i, _l, _a in zip(image_list, landmark_list, angle_list):
+                    predicts = net(_i)
+                    landmark_loss = losses_func[0](predicts[0], _l)
+                    angle_loss = losses_func[1](predicts[1], _a)
+                    losses.append(landmark_loss + angle_loss)
             else:
-                landmark_loss = losses_func[0](predicts, landmark)
-                loss = landmark_loss
-        loss.backward()
+                for _i, _l in zip(image_list, landmark_list):
+                    predicts = net(_i)
+                    landmark_loss = losses_func[0](predicts, _l)
+                    losses.append(landmark_loss)
+        for loss in losses:
+            loss.backward()
         trainer.step(batch_size)
+        loss_list.append(np.mean([nd.mean(l).asscalar() for l in losses]))
         nd.waitall()
-        landmark_loss_list.append(nd.mean(landmark_loss).asscalar())
-        if train_angle:
-            angle_loss_list.append(nd.mean(angle_loss).asscalar())
         if step % display == 0:
             end_time = time.time()
             cost_time, start_time = end_time - start_time, end_time
             sample_per_sec = int(display * batch_size / cost_time)
             sec_per_step = cost_time / float(display)
-            if train_angle:
-                loss_display = "[landmark: %.5f  angle: %.5f]" % (np.mean(landmark_loss_list),
-                                                                  np.mean(angle_loss_list))
-            else:
-                loss_display = "[landmark: %.5f]" % (np.mean(landmark_loss_list))
+            loss_display = "[landmark: %.5f]" % (np.mean(loss_list))
             print ('[%s] epochs: %d, step: %d, lr: %.5f, loss: %s,'\
                    'sample/s: %d, sec/step: %.3f' % (
                    datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), 
                    _batch_reader.get_epoch(), step, trainer.learning_rate, loss_display,
                    sample_per_sec, sec_per_step))
-            landmark_loss_list, angle_loss_list = [], []
+            loss_list = []
         if step % 1024 == 0:
             # change lr
             trainer.set_learning_rate(trainer.learning_rate * 0.95)
