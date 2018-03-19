@@ -4,6 +4,7 @@ import sys
 import cv2
 import numpy as np
 
+sys.path.insert(0, "/home/liubofang/bob_opensource/incubator-mxnet-v1.1.0/python")
 import mxnet as mx
 from mxnet import nd
 from mxnet import gluon
